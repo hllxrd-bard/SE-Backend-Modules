@@ -1,11 +1,11 @@
 import asyncio
 import httpx
-import re
+import json
 
 # ==========================================
 # HÀM GỌI LLM (TÓM TẮT 1 ĐOẠN TEXT)
 # ==========================================
-async def summarize_single_page(client: httpx.AsyncClient, page_num: str, text_content: str) -> tuple:
+async def summarize_single_page(client: httpx.AsyncClient, page_num: int, text_content: str) -> tuple:
     """Gọi API Qwen2.5 để tóm tắt nội dung 1 trang."""
     
     # URL của SGLang server (Đệ nhớ kiểm tra lại port)
@@ -48,40 +48,37 @@ Kết quả phân tích:"""
         return (page_num, err_msg)
 
 # ==========================================
-# HÀM XỬ LÝ CHÍNH: ĐỌC FILE -> GOM TRANG -> TÓM TẮT
+# HÀM XỬ LÝ CHÍNH: ĐỌC JSON -> GOM TRANG -> TÓM TẮT -> GHI SUMMARY VÀO JSON
 # ==========================================
-async def process_and_summarize(input_txt_path: str, output_txt_path: str):
-    print(f"Đang đọc file OCR: {input_txt_path}")
+async def process_and_summarize(input_json_path: str, output_json_path: str):
+    print(f"Đang đọc file OCR JSON: {input_json_path}")
     
     try:
-        with open(input_txt_path, "r", encoding="utf-8") as f:
-            raw_text = f.read()
+        with open(input_json_path, "r", encoding="utf-8") as f:
+            ocr_data = json.load(f)
     except FileNotFoundError:
-        print(f"Không tìm thấy file {input_txt_path}!")
+        print(f"Không tìm thấy file {input_json_path}!")
+        return
+    except json.JSONDecodeError as e:
+        print(f"File JSON không hợp lệ: {e}")
         return
 
     # 1. GOM TEXT THEO TỪNG TRANG
-    # Dùng Regex để tìm các đoạn bắt đầu bằng "--- TRANG X | CỘT Y ---"
-    # Logic: Chia nhỏ file text dựa trên chữ "--- TRANG"
-    pages_data = {} # Format: {'1': "text cột 1 \n text cột 2", '2': "..."}
+    # Duyệt qua tất cả các block, gom ocr_text theo page number
+    pages_data = {}  # Format: {1: "text block 1\ntext block 2\n...", 2: "..."}
     
-    # Cắt text thành từng khối dựa trên tiêu đề
-    blocks = re.split(r'--- TRANG (\d+) \| CỘT \d+ ---', raw_text)
-    
-    # blocks[0] thường là rỗng hoặc rác đầu file.
-    # Từ blocks[1] trở đi: blocks[i] là số trang, blocks[i+1] là nội dung
-    for i in range(1, len(blocks), 2):
-        page_num = blocks[i]
-        content = blocks[i+1].strip()
+    for block in ocr_data:
+        page_num = block["page"]
+        ocr_text = block.get("ocr_text", "").strip()
         
-        if page_num not in pages_data:
-            pages_data[page_num] = ""
-        pages_data[page_num] += content + "\n\n"
+        if ocr_text:
+            if page_num not in pages_data:
+                pages_data[page_num] = ""
+            pages_data[page_num] += ocr_text + "\n\n"
 
     print(f"Đã gom được {len(pages_data)} trang. Bắt đầu tóm tắt đồng thời...")
 
     # 2. GỌI LLM TÓM TẮT ĐỒNG THỜI (ASYNC)
-    summaries = []
     async with httpx.AsyncClient() as client:
         # Tạo danh sách các task (mỗi task tóm tắt 1 trang)
         tasks = [
@@ -92,23 +89,25 @@ async def process_and_summarize(input_txt_path: str, output_txt_path: str):
         # Chạy tất cả các task cùng lúc
         results = await asyncio.gather(*tasks)
 
-    # 3. LƯU KẾT QUẢ RA FILE
-    # Sắp xếp lại kết quả theo số trang (vì chạy async nên kết quả trả về có thể lộn xộn)
-    results.sort(key=lambda x: int(x[0]))
-    
-    with open(output_txt_path, "w", encoding="utf-8") as f:
-        for page_num, summary in results:
-            f.write(f"=== TÓM TẮT TRANG {page_num} ===\n")
-            f.write(f"{summary}\n\n")
-            f.write("="*40 + "\n\n")
+    # 3. TẠO DICT: page_num -> summary
+    summary_map = {page_num: summary for page_num, summary in results}
+
+    # 4. GHI SUMMARY VÀO TỪNG BLOCK TRONG JSON
+    for block in ocr_data:
+        page_num = block["page"]
+        block["summary"] = summary_map.get(page_num, "")
+
+    # 5. LƯU KẾT QUẢ RA FILE JSON MỚI
+    with open(output_json_path, "w", encoding="utf-8") as f:
+        json.dump(ocr_data, f, ensure_ascii=False, indent=2)
 
     print(f"\n========= HOÀN THÀNH =========")
-    print(f"Đã lưu kết quả tóm tắt vào: {output_txt_path}")
+    print(f"Đã lưu kết quả tóm tắt vào: {output_json_path}")
 
 # --- CHẠY THỬ ---
 if __name__ == "__main__":
-    INPUT_FILE = "ket_qua_ocr_final.txt"
-    OUTPUT_FILE = "summary.txt"
+    INPUT_FILE = "ket_qua_ocr_structured.json"
+    OUTPUT_FILE = "ket_qua_ocr_structured_summarized.json"
     
     # Chạy hàm async trong môi trường đồng bộ
     asyncio.run(process_and_summarize(INPUT_FILE, OUTPUT_FILE))
