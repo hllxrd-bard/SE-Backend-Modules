@@ -11,17 +11,28 @@ async def summarize_single_page(client: httpx.AsyncClient, page_num: int, text_c
     # URL của SGLang server (Đệ nhớ kiểm tra lại port)
     end_point = "http://localhost:5001/v1/chat/completions"
     headers = {"Content-Type": "application/json"}
-    model_name = "Qwen2.5/Qwen2.5-7B-Instruct/" 
+    model_name = "Qwen/Qwen3.6-27B/" 
 
-    prompt = f"""Bạn là một chuyên gia phân tích tài liệu. Hãy đọc nội dung của Trang {page_num} sau đây (văn bản được trích xuất từ OCR) và thực hiện 2 nhiệm vụ:
+    prompt = f"""Bạn là một chuyên gia phân tích và tóm tắt tài liệu.
 
-1. TRÍCH XUẤT TỪ KHÓA: Liệt kê các thuật ngữ chuyên ngành, tên riêng, số liệu quan trọng hoặc khái niệm cốt lõi xuất hiện trong văn bản.
-2. TÓM TẮT CHI TIẾT: Dựa trên các từ khóa vừa tìm được, hãy tóm tắt lại nội dung một cách logic, giữ nguyên các thuật ngữ quan trọng. Trình bày dưới dạng gạch đầu dòng để dễ đọc.
+Hãy đọc kỹ nội dung của Trang {page_num} (được trích xuất từ OCR). Nhiệm vụ của bạn là tạo một bản tóm tắt có cấu trúc theo từng phần nội dung xuất hiện trong văn bản.
+
+Yêu cầu:
+- KHÔNG liệt kê từ khóa riêng lẻ.
+- KHÔNG dùng markdown, bullet points, numbering, ký hiệu đặc biệt hoặc format trang trí.
+- Chỉ trả về phần nội dung tóm tắt thuần văn bản.
+- Tóm tắt phải bám sát nội dung gốc, theo đúng thứ tự xuất hiện trong tài liệu.
+- Khi gặp thuật ngữ chuyên ngành, tên mô hình, công thức, số liệu, thuật toán, dataset, tên riêng hoặc khái niệm quan trọng, phải giữ nguyên chúng trong phần tóm tắt.
+- Chia nội dung thành các đoạn ngắn tương ứng với từng ý/chủ đề của văn bản.
+- Ưu tiên diễn giải logic giữa các ý thay vì liệt kê rời rạc.
+- Không thêm kiến thức ngoài văn bản.
+- Không suy diễn hoặc tự mở rộng nội dung không tồn tại trong OCR.
+- Nếu văn bản OCR bị lỗi hoặc thiếu ngữ cảnh, hãy cố gắng suy luận tối thiểu dựa trên phần nhìn thấy được, nhưng không được bịa nội dung.
 
 Nội dung Trang {page_num}:
 {text_content}
 
-Kết quả phân tích:"""
+Bản tóm tắt:"""
 
     payload = {
         "model": model_name,
